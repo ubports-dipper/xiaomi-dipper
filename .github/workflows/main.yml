@@ -22,8 +22,8 @@ jobs:
       # Run initial build, and compile kernel and recovery
       - name: Build
         run: |
-          apt update
-          apt install android-tools-mkbootimg bc build-essential ca-certificates cpio curl git kmod libssl-dev libtinfo5 python2 sudo unzip wget xz-utils -y --no-install-recommends
+          sudo apt update
+          sudo apt install android-tools-mkbootimg bc build-essential ca-certificates cpio curl git kmod libssl-dev libtinfo5 python2 sudo unzip wget xz-utils -y --no-install-recommends
           ln -sf python2.7 /usr/bin/python
           ./build.sh
       - name: Upload basic tarball with boot and recovery images
@@ -37,8 +37,8 @@ jobs:
       
       - name: Make OTA images
         run: |
-          apt update
-          apt install -y img2simg jq sudo wget xz-utils
+          sudo apt update
+          sudo apt install -y img2simg jq sudo wget xz-utils
           DEVICE="$(source deviceinfo && echo $deviceinfo_codename)"
           ./build/fetch-and-prepare-latest-ota.sh "16.04/arm64/android9/devel" "$DEVICE" ota
           mkdir -p out/
