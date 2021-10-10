@@ -27,7 +27,7 @@ jobs:
           ln -sf python2.7 /usr/bin/python
           ./build.sh
       - name: Upload basic tarball with boot and recovery images
-        uses: actions/upload-artifacts@v2
+        uses: actions/upload-artifact@v2
         with:
           path: out/*
   flashable:
@@ -43,7 +43,7 @@ jobs:
           ./build/fetch-and-prepare-latest-ota.sh "16.04/arm64/android9/devel" "$DEVICE" ota
           mkdir -p out/
           ./build/system-image-from-ota.sh ota/ubuntu_command out
-      - uses: actions/upload-artifacts@v2
+      - uses: actions/upload-artifact@v2
         with:
           name: OTA images
           path: |
