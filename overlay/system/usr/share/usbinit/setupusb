@@ -1,0 +1,95 @@
+#!/bin/sh
+CONFIG_FS=/sys/kernel/config
+CONFIG_DIR=$CONFIG_FS/usb_gadget/
+GADGET_DIR=$CONFIG_DIR/g1
+CONFIG_NAME="c.1"
+
+SERIALNUMBER=`getprop ro.serialno`             # e.g. "0123456789ABCDEF"
+MANUFACTURER=`getprop ro.product.vendor.manufacturer` # e.g. "Volla"
+PRODUCT=`getprop ro.product.vendor.model`             # e.g. "Phone"
+CONTROLLER=`getprop sys.usb.controller`        # e.g. "musb-hdrc"
+
+write() {
+	test -w "$1" || return
+	printf "$2" > "$1"
+}
+
+symlink() {
+	ln -s "$1" "$2"
+}
+
+reset_usb() {
+	rm -f $GADGET_DIR/configs/$CONFIG_NAME/mtp.gs0
+	rm -f $GADGET_DIR/configs/$CONFIG_NAME/ffs.adb
+	rm -f $GADGET_DIR/configs/$CONFIG_NAME/rndis.usb0
+}
+
+setup_mtp() {
+	reset_usb
+	write $GADGET_DIR/functions/mtp.gs0/os_desc/interface.MTP/compatible_id "mtp"
+	write $GADGET_DIR/configs/$CONFIG_NAME/strings/0x409/configuration "mtp"
+	symlink $GADGET_DIR/functions/mtp.gs0 $GADGET_DIR/configs/$CONFIG_NAME/
+	write $GADGET_DIR/UDC $CONTROLLER
+	setprop sys.usb.state mtp
+}
+
+setup_mtp_adb() {
+	reset_usb
+	write $GADGET_DIR/functions/mtp.gs0/os_desc/interface.MTP/compatible_id "mtp_adb"
+	write $GADGET_DIR/configs/$CONFIG_NAME/strings/0x409/configuration "mtp_adb"
+	symlink $GADGET_DIR/functions/mtp.gs0 $GADGET_DIR/configs/$CONFIG_NAME/
+	symlink $GADGET_DIR/functions/ffs.adb $GADGET_DIR/configs/$CONFIG_NAME/
+	start android-tools-adbd
+	sleep 2
+	write $GADGET_DIR/UDC $CONTROLLER
+	setprop sys.usb.state mtp,adb
+}
+
+setup_boot() {
+	if [ -e $GADGET_DIR/functions/mtp.gs0 ]; then
+		echo "Boot setup done"
+		return
+	fi
+
+	if ! mount | grep -q "$CONFIG_FS"; then
+		mount -t configfs none $CONFIG_FS
+		mkdir -p $GADGET_DIR/strings/0x409
+		mkdir -p $GADGET_DIR/functions/rndis.usb0
+		mkdir -p $GADGET_DIR/configs/$CONFIG_NAME/strings/0x409
+	fi
+
+	write $GADGET_DIR/idVendor 0x18D1
+	write $GADGET_DIR/bcdDevice 0x0223
+	write $GADGET_DIR/bcdUSB 0x0200
+	write $GADGET_DIR/os_desc/use 1
+	write $GADGET_DIR/os_desc/b_vendor_code 0x1
+	write $GADGET_DIR/os_desc/qw_sign "MSFT100"
+	write $GADGET_DIR/strings/0x409/serialnumber $SERIALNUMBER
+	write $GADGET_DIR/strings/0x409/manufacturer $MANUFACTURER
+	write $GADGET_DIR/strings/0x409/product $PRODUCT
+	mkdir -p $GADGET_DIR/functions/mtp.gs0
+	mkdir -p $GADGET_DIR/functions/ffs.adb
+	symlink $GADGET_DIR/configs/$CONFIG_NAME $GADGET_DIR/os_desc/$CONFIG_NAME
+
+	mkdir -p /dev/usb-ffs/adb
+	mount -t functionfs -o uid=32011,gid=32011 adb /dev/usb-ffs/adb
+	chown root:plugdev /dev/usb-ffs
+	chmod 775 /dev/usb-ffs
+	chown root:plugdev /dev/usb-ffs/adb
+	chmod 775 /dev/usb-ffs/adb
+
+	chown root:plugdev /dev/mtp_usb
+	chmod 660 /dev/mtp_usb
+}
+
+setup_boot
+
+if [ "$1" = "mtp" ]; then
+	setup_mtp
+elif [ "$1" = "mtp_adb" ]; then
+	setup_mtp_adb
+else
+	echo "No configuration selected."
+fi
+
+exit 0
