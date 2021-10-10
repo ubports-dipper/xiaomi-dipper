@@ -1,0 +1,58 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the main branch
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+
+      # Run initial build, and compile kernel and recovery
+      - name: Build
+        run: |
+          apt update
+          apt install android-tools-mkbootimg bc build-essential ca-certificates cpio curl git kmod libssl-dev libtinfo5 python2 sudo unzip wget xz-utils -y --no-install-recommends
+          ln -sf python2.7 /usr/bin/python
+          ./build.sh
+      - name: Upload basic tarball with boot and recovery images
+        uses: actions/upload-artifacts@v2
+        with:
+          path: out/*
+  flashable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Make OTA images
+        run: |
+          apt update
+          apt install -y img2simg jq sudo wget xz-utils
+          DEVICE="$(source deviceinfo && echo $deviceinfo_codename)"
+          ./build/fetch-and-prepare-latest-ota.sh "16.04/arm64/android9/devel" "$DEVICE" ota
+          mkdir -p out/
+          ./build/system-image-from-ota.sh ota/ubuntu_command out
+      - uses: actions/upload-artifacts@v2
+        with:
+          name: OTA images
+          path: |
+            out/boot.img
+            out/system.img
+            out/recovery.img
+  - devel-flashable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
