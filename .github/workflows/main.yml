@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install android-tools-mkbootimg bc build-essential ca-certificates cpio curl git kmod libssl-dev libtinfo5 python2 sudo unzip wget xz-utils -y --no-install-recommends
-          ln -sf python2.7 /usr/bin/python
+          sudo ln -sf python2.7 /usr/bin/python
           ./build.sh
       - name: Upload basic tarball with boot and recovery images
         uses: actions/upload-artifact@v2
