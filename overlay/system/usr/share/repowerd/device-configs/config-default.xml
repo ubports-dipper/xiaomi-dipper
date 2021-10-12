@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <bool name="config_automatic_brightness_available">true</bool>
+    <integer name="config_criticalBatteryWarningLevel">4</integer>
+    <integer name="config_shutdownBatteryTemperature">680</integer>
+    <integer name="config_screenBrightnessSettingMinimum">1</integer>
+    <integer name="config_screenBrightnessSettingMaximum">255</integer>
+    <integer name="config_screenBrightnessSettingDefault">98</integer>
+    <integer name="config_screenBrightnessDim">1</integer>
+    <integer-array name="config_autoBrightnessLevels">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+        <item>4</item>
+        <item>8</item>
+        <item>12</item>
+        <item>20</item>
+        <item>33</item>
+        <item>55</item>
+        <item>90</item>
+        <item>148</item>
+        <item>245</item>
+        <item>403</item>
+        <item>665</item>
+        <item>1097</item>
+        <item>1808</item>
+        <item>2981</item>
+        <item>5000</item>
+    </integer-array>
+    <integer-array name="config_autoBrightnessLcdBacklightValues">
+            <item>3</item>   <!-- 0-5 -->
+            <item>6</item>   <!-- 5-15 -->
+            <item>16</item>   <!-- 15-50 -->
+            <item>38</item>   <!-- 50-100 -->
+            <item>48</item>   <!-- 100-200 -->
+            <item>55</item>   <!-- 200-400 -->
+            <item>64</item>   <!-- 400-1000 -->
+            <item>74</item>   <!-- 1000-2000 -->
+            <item>120</item>  <!-- 2000-3000 -->
+            <item>164</item>  <!-- 3000-5000 -->
+            <item>225</item>  <!-- 5000-10000 -->
+            <item>255</item>  <!-- 10000-30000 -->
+            <item>255</item>  <!-- 30000+ -->
+    </integer-array>
+</resources>
