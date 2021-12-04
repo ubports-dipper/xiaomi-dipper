@@ -1,7 +1,7 @@
 #!/bin/bash
 set -xe
 
-BUILD_DIR=
+BUILD_DIR=$HOME/build
 OUT=
 
 while [ $# -gt 0 ]
