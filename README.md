@@ -2,7 +2,7 @@
 
 This is based on Halium 9.0, and uses the mechanism described in [this page](https://github.com/ubports/porting-notes/wiki/GitLab-CI-builds-for-devices-based-on-halium_arm64-(Halium-9)). (actually a little modified to work in GitHub Actions, but in general it is the same)
 
-You can download the ready-made artifacts from github: take the [latest archive](https://github.com/ubports-dipper/xiaomi-dipper/suites/4028909010/artifacts/101927864e), unpack the `OTA images.zip` file (make sure that all files are created inside a directory called `out/`, then follow the instructions in the [Install](#install) section.
+You can download the ready-made artifacts from github: take the [latest archive](https://github.com/ubports-dipper/xiaomi-dipper/suites/4028909010/artifacts/101927864e), unpack the `OTA images.zip` file (make sure that all files are created inside a directory called `out/`, then follow the instructions in the [Install](#install) section. You can apply patches yourself, just use my [script](https://github.com/istadem2077/simg2zip).
 
 Or you can use installable ZIP archives from Releases. Just install it as any other Custom ROM. Do a full wipe and format data (WARNING!! ALL DATA WILL BE LOST, FORMATTING DATA IS NECESSARY IF YOU ARE DOWNGRADING FROM ANDROID 10 OR HIGHER), and install zip. Don't install Magisk, it wont work here, and may even destroy your system. Firmware and Vendor are already packed in zip so no need to additionally install vendor+fw.
 
