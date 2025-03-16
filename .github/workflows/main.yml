@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v2
       
       - name: Make OTA images
         run: |
@@ -46,7 +46,7 @@ jobs:
           ./build/fetch-and-prepare-latest-ota.sh "16.04/arm64/android9/devel" "$DEVICE" ota
           mkdir -p out/
           ./build/system-image-from-ota.sh ota/ubuntu_command out
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         with:
           name: OTA images
           path: |
