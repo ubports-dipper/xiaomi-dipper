@@ -1,0 +1,16 @@
+[Unit]
+Description=Dipper battery charge limiter (stop at 80%, resume at 75%)
+
+[Service]
+Type=simple
+Environment=CHARGE_STOP=80 CHARGE_START=75
+# Change the limits with a drop-in in the writable /etc/systemd/system
+# (`systemctl edit dipper-charge-limit`, Environment=CHARGE_STOP=90 ...).
+# Disable with `systemctl mask dipper-charge-limit`: the wants link lives
+# in /lib, so `systemctl disable` can't remove it.
+ExecStart=/usr/libexec/dipper-charge-limit
+ExecStopPost=/bin/sh -c 'echo 0 > /sys/class/power_supply/battery/input_suspend'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

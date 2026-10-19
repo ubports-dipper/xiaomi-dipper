@@ -1,51 +1,63 @@
 name: CI
 
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the main branch
   push:
-    branches: [ main ]
+    branches: [ main, focal/port-bootstrap ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, focal/port-bootstrap ]
   repository_dispatch:
     types: [ kernel-update ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      # Run initial build, and compile kernel and recovery
-      - name: Build
+      - name: Build device tarball
         run: |
           sudo apt update
-          sudo apt install android-tools-mkbootimg bc build-essential ca-certificates cpio curl git kmod libssl-dev libtinfo5 python2 sudo unzip wget xz-utils -y --no-install-recommends
+          sudo apt install -y --no-install-recommends \
+            android-tools-mkbootimg bc bison build-essential ca-certificates cpio curl \
+            fakeroot flex git kmod libelf-dev libssl-dev libtinfo5 lz4 python2 python3 \
+            sudo unzip wget xz-utils
           sudo ln -sf python2.7 /usr/bin/python
-          ./build.sh
-      - name: Upload basic tarball with boot and recovery images
+          ./build.sh -b workdir -o out
+
+      - name: Upload device tarball
         uses: actions/upload-artifact@v4
         with:
           path: out/*
+
   flashable:
     runs-on: ubuntu-22.04
     needs: build
     steps:
-      - uses: actions/checkout@v2
-      
-      - name: Make OTA images
+      - uses: actions/checkout@v4
+
+      # Without `name`, v4 extracts into out/<artifact-name>/ and the device
+      # tarball is silently skipped (cp fails, "Skipping missing file"), giving
+      # a system.img with no /opt/halium-overlay at all.
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: artifact
+          path: out
+
+      - name: Build focal flashable images
         run: |
           sudo apt update
           sudo apt install -y img2simg jq sudo wget xz-utils
+          git clone -b main --depth 1 \
+            https://gitlab.com/ubports/porting/community-ports/halium-generic-adaptation-build-tools.git \
+            build
           DEVICE="$(source deviceinfo && echo $deviceinfo_codename)"
-          ./build/fetch-and-prepare-latest-ota.sh "16.04/arm64/android9/devel" "$DEVICE" ota
-          mkdir -p out/
+          test -f "out/device_${DEVICE}.tar.xz" || { ls -laR out; echo "device tarball missing"; exit 1; }
+          ./build/prepare-fake-ota.sh "out/device_${DEVICE}.tar.xz" ota
+          test -f "ota/device_${DEVICE}.tar.xz" || { echo "device tarball not staged into OTA"; exit 1; }
           ./build/system-image-from-ota.sh ota/ubuntu_command out
+
       - uses: actions/upload-artifact@v4
         with:
           name: OTA images

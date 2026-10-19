@@ -1,93 +1,48 @@
 #!/bin/bash
 set -xe
 
-BUILD_DIR=$HOME/build
-OUT=
+ADAPTATION_TOOLS_REPO="https://gitlab.com/ubports/porting/community-ports/halium-generic-adaptation-build-tools.git"
+ADAPTATION_TOOLS_BRANCH="${ADAPTATION_TOOLS_BRANCH:-main}"
 
-while [ $# -gt 0 ]
-do
-    case "$1" in
-    (-b) BUILD_DIR="$(realpath "$2")"; shift;;
-    (-o) OUT="$2"; shift;;
-    (-*) echo "$0: Error: unknown option $1" 1>&2; exit 1;;
-    (*) OUT="$2"; break;;
-    esac
-    shift
-done
+apply_build_toolchain_fixes() {
+    local repo="$1"
+    local setup="$repo/setup_repositories.sh"
+    local kernel="$repo/build-kernel.sh"
 
-OUT="$(realpath "$OUT" 2>/dev/null || echo 'out')"
-mkdir -p "$OUT"
-
-if [ -z "$BUILD_DIR" ]; then
-    TMP=$(mktemp -d)
-    TMPDOWN=$(mktemp -d)
-else
-    TMP="$BUILD_DIR/tmp"
-    mkdir -p "$TMP"
-    TMPDOWN="$BUILD_DIR/downloads"
-    mkdir -p "$TMPDOWN"
-fi
-
-HERE=$(pwd)
-SCRIPT="$(dirname "$(realpath "$0")")"/build
-
-mkdir -p "${TMP}/system"
-mkdir -p "${TMP}/partitions"
-
-source "${HERE}/deviceinfo"
-
-case $deviceinfo_arch in
-    "armhf") RAMDISK_ARCH="armhf";;
-    "aarch64") RAMDISK_ARCH="arm64";;
-    "x86") RAMDISK_ARCH="i386";;
-esac
-
-cd "$TMPDOWN"
-    [ -d aarch64-linux-android-4.9 ] || git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b pie-gsi --depth 1
-    GCC_PATH="$TMPDOWN/aarch64-linux-android-4.9"
-    if [ -n "$deviceinfo_kernel_clang_compile" ] && $deviceinfo_kernel_clang_compile; then
-        [ -d linux-x86 ] || git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b pie-gsi --depth 1
-        CLANG_PATH="$TMPDOWN/linux-x86/clang-4691093"
+    if [ -f "$setup" ] && ! grep -q 'chmod +x "$GCC_ARM32_PATH/arm-linux-androideabi/bin/as"' "$setup"; then
+        sed -i.bak '/sed -i.bak "1 s:\.\*:#!\/usr\/bin\/env python3:" "$GCC_ARM32_PATH\/arm-linux-androideabi\/bin\/as"/a\            chmod +x "$GCC_ARM32_PATH/arm-linux-androideabi/bin/as"' "$setup"
     fi
-    [ -d arm-linux-androideabi-4.9 ] || git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b pie-gsi --depth 1
-    GCC_ARM32_PATH="$TMPDOWN/arm-linux-androideabi-4.9"
 
-    KERNEL_DIR="$(basename "${deviceinfo_kernel_source}")"
-    KERNEL_DIR="${KERNEL_DIR%.*}"
-    [ -d "$KERNEL_DIR" ] || git clone "$deviceinfo_kernel_source" -b $deviceinfo_kernel_source_branch --depth 1
-
-    [ -f halium-boot-ramdisk.img ] || curl --location --output halium-boot-ramdisk.img \
-        "https://github.com/halium/initramfs-tools-halium/releases/download/continuous/initrd.img-touch-${RAMDISK_ARCH}"
-
-    if [ -n "$deviceinfo_kernel_apply_overlay" ] && $deviceinfo_kernel_apply_overlay; then
-        [ -d libufdt ] || git clone https://android.googlesource.com/platform/system/libufdt -b pie-gsi --depth 1
-        [ -d dtc ] || git clone https://android.googlesource.com/platform/external/dtc -b pie-gsi --depth 1
+    if [ -f "$kernel" ] && ! grep -q 'ARM32_MAKE_ARGS' "$kernel"; then
+        sed -i.bak '/export CROSS_COMPILE_ARM32/a\
+    ARM32_GCC_BIN="${TMPDOWN}/arm-linux-androideabi-4.9/arm-linux-androideabi/bin"\
+    if [ -d "$ARM32_GCC_BIN" ]; then\
+        ARM32_MAKE_ARGS=(CC_ARM32="${CROSS_COMPILE_ARM32}gcc -B ${ARM32_GCC_BIN}/")\
+    fi' "$kernel"
+        sed -i.bak 's/make O="$OUT" $MAKEOPTS /make O="$OUT" $MAKEOPTS "${ARM32_MAKE_ARGS[@]}" /g' "$kernel"
     fi
-    ls .
-cd "$HERE"
 
-if [ -n "$deviceinfo_kernel_apply_overlay" ] && $deviceinfo_kernel_apply_overlay; then
-    "$SCRIPT/build-ufdt-apply-overlay.sh" "${TMPDOWN}"
+    # Merge ./kernel.config over the defconfig and fail if any option is lost.
+    if [ -f "$kernel" ] && ! grep -q 'kernel.config fragment' "$kernel"; then
+        sed -i.bak '/^make O=.*\$deviceinfo_kernel_defconfig$/a\
+# kernel.config fragment (added by xiaomi-dipper build.sh)\
+if [ -f "$HERE/kernel.config" ]; then\
+    sed -n "s/^CONFIG_\\([A-Za-z0-9_]*\\)=\\(.*\\)$/\\1 \\2/p" "$HERE/kernel.config" | while read -r name val; do\
+        scripts/config --file "$OUT/.config" --set-val "$name" "$val"\
+    done\
+    make O="$OUT" $MAKEOPTS "${ARM32_MAKE_ARGS[@]}" olddefconfig\
+    grep "^CONFIG_" "$HERE/kernel.config" | while read -r opt; do\
+        grep -qx "$opt" "$OUT/.config" || { echo "kernel.config: $opt not applied" >&2; exit 1; }\
+    done\
+fi' "$kernel"
+        grep -q 'kernel.config fragment' "$kernel"
+    fi
+}
+
+if [ ! -f build/build.sh ]; then
+    git clone -b "$ADAPTATION_TOOLS_BRANCH" --depth 1 "$ADAPTATION_TOOLS_REPO" build
 fi
 
-if [ -n "$deviceinfo_kernel_clang_compile" ] && $deviceinfo_kernel_clang_compile; then
-    CC=clang \
-    CLANG_TRIPLE=${deviceinfo_arch}-linux-gnu- \
-    PATH="$CLANG_PATH/bin:$GCC_PATH/bin:$GCC_ARM32_PATH/bin:${PATH}" \
-    "$SCRIPT/build-kernel.sh" "${TMPDOWN}" "${TMP}/system"
-else
-    PATH="$GCC_PATH/bin:$GCC_ARM32_PATH/bin:${PATH}" \
-    "$SCRIPT/build-kernel.sh" "${TMPDOWN}" "${TMP}/system"
-fi
+apply_build_toolchain_fixes build
 
-"$SCRIPT/make-bootimage.sh" "${TMPDOWN}/KERNEL_OBJ" "${TMPDOWN}/halium-boot-ramdisk.img" "${TMP}/partitions/boot.img"
-
-cp -av overlay/* "${TMP}/"
-"$SCRIPT/build-tarball-mainline.sh" "${deviceinfo_codename}" "${OUT}" "${TMP}"
-
-if [ -z "$BUILD_DIR" ]; then
-    rm -r "${TMP}"
-    rm -r "${TMPDOWN}"
-fi
-
-echo "done"
+exec ./build/build.sh "$@"

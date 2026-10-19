@@ -1,0 +1,76 @@
+#!/bin/sh -ef
+# Copyright (C) 2021 UBports Foundation
+# Dipper: nest Lomiri's Mir server on unity-system-compositor instead of
+# opening a second Android-EGL stack (select_egl_config fails on sdm845).
+# Diagnostics go to stdout -> the lomiri-full-greeter.service journal.
+
+echo "DIPPER-WRAP: start uid=$(id -u) XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-unset} args=$*"
+echo "DIPPER-WRAP: pre MIR_SERVER_HOST_SOCKET=${MIR_SERVER_HOST_SOCKET:-unset} MIR_SOCKET=${MIR_SOCKET:-unset}"
+for s in /run/mir_socket /run/lightdm/mir_socket "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/mir_socket"; do
+    if [ -e "$s" ]; then
+        echo "DIPPER-WRAP: socket present: $(ls -ld "$s" 2>&1)"
+    else
+        echo "DIPPER-WRAP: socket absent: $s"
+    fi
+done
+
+export QML_NO_TOUCH_COMPRESSION=1
+export MIR_SERVER_ENABLE_MIRCLIENT=1
+export MIR_SERVER_PROMPT_FILE=1
+
+if [ -z "$XDG_RUNTIME_DIR" ]; then
+    XDG_RUNTIME_DIR=/run/user/$(id -u)
+    export XDG_RUNTIME_DIR
+fi
+
+export MIR_SERVER_FILE="${XDG_RUNTIME_DIR}/mir_socket"
+rm -f "$MIR_SERVER_FILE"
+rm -f "${MIR_SERVER_FILE}_trusted"
+
+export WAYLAND_DISPLAY=wayland-0
+export QT_QPA_PLATFORM=mirserver
+export LOMIRI_AS_SYSTEMD_UNIT=1
+export MIR_SERVER_ENABLE_X11=1
+export MIR_SERVER_XWAYLAND_PATH=/usr/libexec/Xwayland.lomiri
+
+# Nest on USC's compositor socket so the inner server uses Mir's nested
+# graphics platform instead of grabbing the Android EGL display.
+if [ -z "${MIR_SERVER_HOST_SOCKET:-}" ]; then
+    for s in /run/mir_socket /run/lightdm/mir_socket; do
+        if [ -e "$s" ]; then
+            export MIR_SERVER_HOST_SOCKET="$s"
+            break
+        fi
+    done
+fi
+echo "DIPPER-WRAP: using MIR_SERVER_HOST_SOCKET=${MIR_SERVER_HOST_SOCKET:-NONE}"
+
+# No USC (lightdm is masked on dipper): Lomiri is the sole hardware Mir
+# server. Mirror lsc-wrapper's environment, which inits Android EGL fine.
+if [ -z "${MIR_SERVER_HOST_SOCKET:-}" ]; then
+    [ -r /etc/environment ] && . /etc/environment
+    export ANDROID_ROOT
+    export LD_PRELOAD=libtls-padding.so
+    export MIR_SERVER_ENABLE_KEY_REPEAT=false
+    # Running under the user manager there is no controlling tty, so the vt
+    # provider cannot do its ioctls, and logind device handover never yields
+    # the fts touchscreen. Open evdev nodes directly (phablet is in
+    # android_input, which owns event* via 65-android.rules).
+    export MIR_SERVER_CONSOLE_PROVIDER="${MIR_SERVER_CONSOLE_PROVIDER:-none}"
+    # The generic Halium image reports ro.product.device=halium_arm64; make
+    # libdeviceinfo (here and inside Lomiri/Mir) read devices/dipper.yaml, and
+    # take the grid unit from it rather than trusting the inherited env.
+    export DEVICEINFO_DEVICE_NAME="${DEVICEINFO_DEVICE_NAME:-dipper}"
+    echo "DIPPER-WRAP: inherited GRID_UNIT_PX=${GRID_UNIT_PX:-unset} QTWEBKIT_DPR=${QTWEBKIT_DPR:-unset}"
+    gu="$(device-info get GridUnit 2>/dev/null || true)"
+    [ -n "$gu" ] && export GRID_UNIT_PX="$gu"
+    echo "DIPPER-WRAP: sole compositor, console=${MIR_SERVER_CONSOLE_PROVIDER:-auto} GRID_UNIT_PX=${GRID_UNIT_PX:-unset}"
+fi
+
+dbus-update-activation-environment --systemd MIR_SOCKET="${MIR_SERVER_FILE}"
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY
+if [ -n "${MIR_SERVER_HOST_SOCKET:-}" ]; then
+    dbus-update-activation-environment --systemd MIR_SERVER_HOST_SOCKET="${MIR_SERVER_HOST_SOCKET}"
+fi
+
+exec ${LOMIRI_BINARY:-lomiri} "$@"

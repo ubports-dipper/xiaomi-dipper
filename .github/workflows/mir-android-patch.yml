@@ -1,0 +1,90 @@
+name: mir-android2-platform patch
+
+# Builds a patched mir-android2-platform for dipper (Focal / Halium 9, arm64).
+#
+# Fix: the DeviceQuirks GPU-probe context (select_egl_config_with_any_format)
+# requests EGL_SURFACE_TYPE = EGL_WINDOW_BIT | EGL_PBUFFER_BIT. On sdm845 the
+# Lomiri greeter's mir-android2 server starts while the system compositor still
+# holds the only window-capable EGL config, so eglChooseConfig returns 0 and the
+# greeter dies ("could not select EGL config") -> lightdm respawn loop = screen
+# flicker. The probe only ever makes a PBUFFER surface, so EGL_WINDOW_BIT is
+# unnecessary; dropping it lets the probe succeed alongside the compositor.
+#
+# Fix 2: HwcPlatform::create_display() ignored the initial display
+# configuration policy, so with Lomiri as the sole compositor the output scale
+# stayed 1 and the UI rendered at the toolkit's 8px default grid unit.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ focal/port-bootstrap ]
+    paths:
+      - .github/workflows/mir-android-patch.yml
+      - patches/mir-android2-*.patch
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable arm64 emulation
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+          sudo update-binfmts --enable qemu-aarch64
+
+      - name: Build patched mir-android2-platform in arm64 Focal chroot
+        run: |
+          set -eux
+          cat > build.sh <<'INNER'
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y ca-certificates gnupg wget git devscripts equivs patch
+
+          # UBports Focal repo provides the Mir/hybris dev packages.
+          echo "deb http://repo.ubports.com/ focal main" > /etc/apt/sources.list.d/ubports.list
+          wget -qO- https://repo.ubports.com/keyring.gpg | gpg --dearmor > /etc/apt/trusted.gpg.d/ubports.gpg || \
+            wget -qO /etc/apt/trusted.gpg.d/ubports.gpg https://repo.ubports.com/keyring.gpg
+          apt-get update
+
+          git clone --depth 1 -b ubports/focal \
+            https://gitlab.com/ubports/development/core/hybris-support/mir-android2-platform.git src
+          cd src
+
+          # Relax DeviceQuirks EGL probe: PBUFFER first, then any ES2 config.
+          patch -p1 < /work/patches/mir-android2-egl-probe.patch
+          grep -n "try_choose\|EGL_SURFACE_TYPE" src/platforms/android/server/gl_context.cpp
+
+          # Apply the initial display configuration policy in create_display()
+          # (output scale / form factor from qtmir's GRID_UNIT_PX policy).
+          patch -p1 < /work/patches/mir-android2-initial-display-policy.patch
+          grep -n "initial_conf_policy->apply_to" src/platforms/android/server/platform.cpp
+
+          # Install build deps and build the .deb set.
+          mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
+          dpkg-buildpackage -b -uc -us -aarch64 || dpkg-buildpackage -b -uc -us
+          ls -l ..
+          mkdir -p /out
+          cp ../*.deb /out/ || true
+          INNER
+
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/work -w /work arm64v8/ubuntu:focal \
+            bash -lc 'cp /work/build.sh /build.sh && mkdir -p /out && bash /build.sh && cp /out/*.deb /work/ 2>/dev/null || true; ls -l /work/*.deb || true'
+
+      - name: Extract graphics-android2.so from .deb
+        run: |
+          set -eux
+          mkdir -p out
+          for d in mir-platform-graphics-android2*.deb; do dpkg-deb -x "$d" extract || true; done
+          find extract -name 'graphics-android2.so*' | tee out/so-list.txt
+          find extract -name 'graphics-android2.so*' -exec cp {} out/ \;
+          cp mir-platform-graphics-android2*.deb out/ 2>/dev/null || true
+          test -f out/graphics-android2.so.15
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mir-android2-platform-patched
+          path: out/

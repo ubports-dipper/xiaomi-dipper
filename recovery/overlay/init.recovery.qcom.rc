@@ -16,6 +16,9 @@ service setup_fake_cache /sbin/sh /setup_fake_cache.sh
 
 on property:ro.boot.configfs=*
     #Set up configfs
+    setprop sys.usb.controller "a600000.dwc3"
+    mkdir /dev/usb-ffs 0770 shell shell
+    mkdir /dev/usb-ffs/adb 0770 shell shell
     mount configfs none /config
     mkdir /config/usb_gadget/g1 0770 shell shell
     mkdir /config/usb_gadget/g1/strings/0x409 0770 shell shell
@@ -31,6 +34,9 @@ on property:ro.boot.configfs=*
     write /config/usb_gadget/g1/os_desc/qw_sign "MSFT100"
     symlink /config/usb_gadget/g1/configs/b.1 /config/usb_gadget/g1/os_desc/b.1
     mount functionfs adb /dev/usb-ffs/adb uid=2000,gid=1000,rmode=0770,fmode=0660
+    setprop sys.usb.config adb
+    setprop sys.usb.configfs 1
+    start adbd
 
 on property:sys.usb.ffs.ready=1
     write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "Recovery mode"
@@ -42,6 +48,6 @@ on property:sys.usb.ffs.ready=1
     write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "adb"
     write /config/usb_gadget/g1/idVendor 0x05c6
     write /config/usb_gadget/g1/idProduct 0x9039
-    write /config/usb_gadget/g1/strings/0x409/product "Xiaomi Mi Mix 3"
+    write /config/usb_gadget/g1/strings/0x409/product "Xiaomi Mi 8"
     symlink /config/usb_gadget/g1/functions/ffs.adb /config/usb_gadget/g1/configs/b.1/f1
     write /config/usb_gadget/g1/UDC ${sys.usb.controller}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Goodix fingerprint ghost key disabler
+After=graphical.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/uinput-goodix-key-disable
+Restart=always
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,40 @@
+diff --git a/src/platforms/android/server/platform.cpp b/src/platforms/android/server/platform.cpp
+index c6386ca..d032589 100644
+--- a/src/platforms/android/server/platform.cpp
++++ b/src/platforms/android/server/platform.cpp
+@@ -35,6 +35,7 @@
+ #include "mir/graphics/buffer_ipc_message.h"
+ #include "mir/graphics/buffer_id.h"
+ #include "mir/graphics/display_report.h"
++#include "mir/graphics/display_configuration_policy.h"
+ #include "mir/gl/default_program_factory.h"
+ #include "mir/options/option.h"
+ #include "mir/abnormal_exit.h"
+@@ -236,12 +237,25 @@ mga::HwcPlatform::HwcPlatform(
+ }
+ 
+ mir::UniqueModulePtr<mg::Display> mga::HwcPlatform::create_display(
+-    std::shared_ptr<mg::DisplayConfigurationPolicy> const&,
++    std::shared_ptr<mg::DisplayConfigurationPolicy> const& initial_conf_policy,
+     std::shared_ptr<mg::GLConfig> const& gl_config)
+ {
+     auto const program_factory = std::make_shared<mir::gl::DefaultProgramFactory>();
+-    return mir::make_module_ptr<mga::Display>(
++    auto display = mir::make_module_ptr<mga::Display>(
+             display_buffer_builder, program_factory, gl_config, display_report, native_window_report, overlay_option);
++
++    // Apply the server's initial display configuration policy, as the other
++    // Mir platforms do. Upstream ignored it, so when this platform drives the
++    // panel directly (no USC/nesting) the shell's policy - e.g. qtmir's
++    // GRID_UNIT_PX-based output scale and phone form factor - never took
++    // effect and Lomiri rendered at the toolkit's 8px default grid unit.
++    if (initial_conf_policy)
++    {
++        auto conf = display->configuration();
++        initial_conf_policy->apply_to(*conf);
++        display->configure(*conf);
++    }
++    return display;
+ }
+ 
+ mg::NativeDisplayPlatform* mga::HwcPlatform::native_display_platform()

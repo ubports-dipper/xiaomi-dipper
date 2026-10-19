@@ -1,0 +1,29 @@
+[Unit]
+Description=Dipper Lomiri session (phablet, single hardware Mir compositor)
+# lightdm is masked: USC + nested greeter cannot both init EGL on dipper.
+# Instead autologin phablet into a logind seat session on tty1, the way
+# lightdm-autologin would, and let dipper-shell start the stock
+# ubuntu-touch-session.target (Lomiri + indicators) in the user manager.
+After=mount-android.service lxc-android-config.service systemd-user-sessions.service systemd-logind.service multi-user.target
+Wants=mount-android.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=phablet
+PAMName=lightdm-autologin
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=mir XDG_SESSION_CLASS=user XDG_SESSION_DESKTOP=ubuntu-touch XDG_CURRENT_DESKTOP=Lomiri XDG_SEAT=seat0 XDG_VTNR=1
+ExecStart=/usr/libexec/dipper-shell
+Restart=no
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

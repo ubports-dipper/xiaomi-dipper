@@ -1,0 +1,9 @@
+[Unit]
+Description=Qualcomm IPA firmware loader
+After=mount-android.service
+ConditionPathExists=/dev/ipa
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for i in $(seq 1 120); do for fw in /android/vendor/firmware/ipa_fws.mdt /vendor/firmware/ipa_fws.mdt; do if [ -f "$fw" ]; then echo 1 > /dev/ipa; exit 0; fi; done; sleep 1; done; exit 0'
+RemainAfterExit=yes

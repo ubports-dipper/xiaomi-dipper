@@ -1,0 +1,50 @@
+#!/bin/sh
+# Off-mode charging power-up (USB plugged into a powered-off phone): the
+# bootloader passes androidboot.mode=charger. The initramfs boots Ubuntu anyway
+# (ramdisk-overlay/scripts/halium), and Halium's init.rc turns "on charger"
+# into late-init, but Android still runs every other "on charger" block:
+# init.halium.rc starts /sbin/charger (a flashing charging screen over Lomiri)
+# and the vendor blocks take over the USB gadget and mount tmpfs on /data.
+#
+# One vendor block ends in an Android shutdown, whose sysrq emergency remount
+# leaves every filesystem, the host's included, read-only (stuck on the Mi
+# logo). Before the container starts, bind-mount copies of those rc files with
+# their "on charger" triggers renamed so they never fire.
+# Runs as ExecStartPre of lxc-android-config on every boot: "on charger" never
+# fires on a normal boot, so the copies are harmless there, and the binds can
+# be checked in the container's /proc/<init>/mountinfo without a charger boot.
+
+R=/var/lib/lxc/android/rootfs
+D=/run/dipper-charger-rc
+LOG=/run/dipper-charger-guard.log
+mkdir -p "$D"
+: > "$LOG"
+
+# Kernel command line for the container, without the charger mode
+# (bind-mounted over its proc/cmdline by /var/lib/lxc/android/config).
+sed 's/ *androidboot\.mode=charger//' /proc/cmdline > /run/dipper-android-cmdline
+
+for f in \
+    system/etc/init/init.halium.rc \
+    vendor/etc/init/hw/init.qcom.rc \
+    vendor/etc/init/hw/init.qcom.usb.rc \
+    vendor/etc/init/hw/init.target.rc
+do
+    [ -f "$R/$f" ] || continue
+    out="$D/$(echo "$f" | tr / _)"
+    sed 's/^on charger[[:space:]]*$/on dipper-charger-disabled/' "$R/$f" > "$out"
+    chmod 644 "$out"
+    if mount --bind "$out" "$R/$f" 2>> "$LOG"; then
+        msg="disabled 'on charger' in /$f"
+    else
+        msg="FAILED to bind /$f"
+    fi
+    echo "dipper-charger-guard: $msg" >> "$LOG"
+    echo "dipper-charger-guard: $msg" > /dev/kmsg
+done
+
+# DEBUG (remove once charger boot is verified): keep evidence on userdata,
+# since the journal of a charger boot is lost.
+{ echo "== $(date) cmdline: $(cat /proc/cmdline)"; cat "$LOG"; } > /userdata/dipper-charger-guard.log 2>&1
+sync
+exit 0

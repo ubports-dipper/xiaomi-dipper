@@ -39,8 +39,12 @@ identify_boot_mode() {
 		esac
 	done
 
+	# Dipper: Android runs only as an LXC container image here, so there is
+	# no bootable Android charger root; the "android" path dies at run-init
+	# (/sbin/init missing) with a black screen and no USB. Boot Ubuntu for an
+	# off-mode charging power-up; it charges with the full system running.
 	if echo "$android_bootmode" | grep charger; then
-		BOOT_MODE="android"
+		tell_kmsg "charger boot mode requested, booting Ubuntu instead"
 	fi
 
 	## Some devices may be using 'bootreason', others 'boot_reason'

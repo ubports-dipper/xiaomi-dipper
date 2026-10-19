@@ -1,7 +1,0 @@
-# Wait more after finding bluetooth service
-
-pre-start script
-    rfkill unblock all
-    /usr/bin/droid/bluebinder_wait.sh
-    sleep 10
-end script

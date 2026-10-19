@@ -1,0 +1,16 @@
+dipper:
+  Names:
+    - Mi 8
+    - Xiaomi Mi 8
+  PrettyName: Xiaomi Mi 8
+  DeviceType: phone
+  GridUnit: 21
+  WebkitDpr: 2
+  PrimaryOrientation: Portrait
+  # The Mir ubports:android2 server-side EGL fence sync is broken on this
+  # sdm845/Adreno 630 stack: the system compositor renders, but Lomiri clients
+  # fail "could not select EGL config" -> the greeter respawn-loops (screen
+  # flickers on the boot animation). Disabling server EGL sync fixes it, same as
+  # other Qualcomm Halium ports (e.g. xiaomi-surya).
+  MirAndroidPlatformServerEglSync:
+    - false

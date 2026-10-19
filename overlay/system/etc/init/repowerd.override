@@ -1,2 +1,0 @@
-# Android lights HAL is present, but does not work correctly with repowerd
-env REPOWERD_BACKLIGHT_BACKEND=sysfs

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Battery charge limiter. The dipper kernel (qpnp-smb2) has no
+# charging_enabled switch, so cut the charger input with
+# battery/input_suspend once the battery reaches CHARGE_STOP and give it
+# back at CHARGE_START. The gap keeps the charger from toggling every poll.
+# While suspended the phone runs on battery, so upower reports Discharging.
+BAT=/sys/class/power_supply/battery
+CTL=$BAT/input_suspend
+: "${CHARGE_STOP:=80}"
+: "${CHARGE_START:=75}"
+: "${CHARGE_POLL:=30}"
+
+if [ ! -w "$CTL" ]; then
+    echo "dipper-charge-limit: $CTL not writable, nothing to do"
+    exit 0
+fi
+if [ "$CHARGE_START" -ge "$CHARGE_STOP" ]; then
+    echo "dipper-charge-limit: CHARGE_START=$CHARGE_START must be below CHARGE_STOP=$CHARGE_STOP"
+    exit 1
+fi
+
+# Never leave the phone unable to charge when the service goes away.
+trap 'echo 0 > "$CTL"; exit 0' TERM INT
+
+echo "dipper-charge-limit: stop at ${CHARGE_STOP}%, resume at ${CHARGE_START}%"
+while :; do
+    cap=$(cat "$BAT/capacity" 2>/dev/null)
+    cur=$(cat "$CTL" 2>/dev/null)
+    case "$cap" in
+    ''|*[!0-9]*) ;;
+    *)
+        if [ "$cap" -ge "$CHARGE_STOP" ] && [ "$cur" != 1 ]; then
+            echo 1 > "$CTL" && echo "dipper-charge-limit: ${cap}%, charger input suspended"
+        elif [ "$cap" -le "$CHARGE_START" ] && [ "$cur" != 0 ]; then
+            echo 0 > "$CTL" && echo "dipper-charge-limit: ${cap}%, charger input resumed"
+        fi
+        ;;
+    esac
+    sleep "$CHARGE_POLL" &
+    wait $!
+done

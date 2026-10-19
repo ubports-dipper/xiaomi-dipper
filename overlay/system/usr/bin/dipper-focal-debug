@@ -1,0 +1,45 @@
+#!/bin/sh
+# DEBUG ONLY: capture the failing Focal graphical session to persistent userdata
+# so it can be diagnosed from recovery (USB ADB on this build is unreliable).
+#
+# Root cause is NOT the compositor's dequeueBuffer flood (that is just teardown
+# noise when the spinner loses its socket). lightdm.log shows the autologin
+# session "ubuntu-touch-lightdm-session ubuntu-touch-session" exits with status 1
+# in ~4s while unity8.log/lomiri.log stay empty - so it fails before the
+# compositor starts and the real error lands in ~/.xsession-errors, which we were
+# never capturing. This grabs that plus the boot journal and the Android logcat.
+OUT=/userdata/focal-debug
+mkdir -p "$OUT" 2>/dev/null
+exec >>"$OUT/run.log" 2>&1
+echo "=== dipper-focal-debug start $(date -u) uptime=$(cat /proc/uptime) ==="
+
+# Give lightdm a few respawn cycles to populate .xsession-errors and the journal.
+sleep 45
+
+dump() { echo "----- $1 -----"; }
+
+{
+  dump "phablet .xsession-errors"; tail -400 /home/phablet/.xsession-errors 2>/dev/null
+  dump "lightdm data .xsession-errors"; tail -200 /var/lib/lightdm-data/phablet/.xsession-errors 2>/dev/null
+  dump "session upstart unity8.log"; tail -200 /home/phablet/.cache/upstart/unity8.log 2>/dev/null
+  dump "session upstart lomiri.log"; tail -200 /home/phablet/.cache/upstart/lomiri.log 2>/dev/null
+  dump "session upstart dbus / indicators"; tail -80 /home/phablet/.cache/upstart/dbus.log 2>/dev/null
+  dump "lightdm.log"; tail -200 /var/log/lightdm/lightdm.log 2>/dev/null
+  dump "boot journal: lightdm/session"; journalctl -b --no-pager -o short-monotonic -u lightdm 2>/dev/null | tail -200
+  dump "boot journal: user phablet"; journalctl -b --no-pager --user-unit '*' _UID=32011 2>/dev/null | tail -200
+  dump "ubuntu-touch-session.conf"; cat /etc/lightdm/lightdm.conf.d/*ubuntu-touch* /usr/share/lightdm/lightdm.conf.d/*ubuntu-touch* 2>/dev/null
+} > "$OUT/session-$(date -u +%H%M%S).txt" 2>&1
+
+{
+  dump "host dmesg"; dmesg 2>/dev/null | tail -300
+  dump "container logcat -d"; lxc-attach -n android -- /system/bin/logcat -d 2>/dev/null | tail -1500
+  dump "container getprop"; lxc-attach -n android -- /system/bin/getprop 2>/dev/null
+  dump "container ps"; lxc-attach -n android -- /system/bin/ps -A 2>/dev/null
+  dump "host: graphics services"; systemctl --no-pager status lightdm unity-system-compositor 2>/dev/null | head -60
+  dump "test_hwcomposer"; EGL_PLATFORM=hwcomposer timeout 15 test_hwcomposer 2>&1 | head -80
+} > "$OUT/graphics-$(date -u +%H%M%S).txt" 2>&1
+
+cp /var/log/lightdm/unity-system-compositor.log "$OUT/usc.log" 2>/dev/null
+cp /home/phablet/.xsession-errors "$OUT/xsession-errors.log" 2>/dev/null
+echo "=== dipper-focal-debug done $(date -u) ==="
+exit 0

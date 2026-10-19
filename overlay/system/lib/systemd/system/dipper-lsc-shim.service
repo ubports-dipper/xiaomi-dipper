@@ -1,0 +1,15 @@
+[Unit]
+Description=Dipper: USC D-Bus stand-in for repowerd (power button, user activity, display)
+# lightdm/USC are not used on dipper (Lomiri is the sole compositor), but
+# repowerd takes its power-button, user-activity and display signals from USC.
+Requires=dbus.socket
+After=dbus.socket systemd-udevd.service
+Before=repowerd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/dipper-lsc-shim
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
