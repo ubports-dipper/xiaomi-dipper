@@ -1,0 +1,57 @@
+#!/bin/sh
+# Battery charge limiter. The dipper kernel (qpnp-smb2) has no
+# charging_enabled switch. battery/input_suspend cuts the whole USB input,
+# and toggling it makes the USB gadget see an unplug (ADB/MTP drop until the
+# cable is replugged). Instead use battery/charge_control_limit, the thermal
+# "system temp level": at its maximum the driver votes charging off while
+# the USB input stays up, so the phone runs from USB and the battery idles
+# ("Not charging"). Stop at CHARGE_STOP, resume at CHARGE_START; the gap
+# keeps the charger from toggling every poll.
+#
+# The driver only votes when a cable is present and doesn't re-apply the
+# level on plug-in, so act on the reported charge status, not on the stored
+# level alone. It also marks the attribute read-only (its writable list
+# names SYSTEM_TEMP_LEVEL, which this kernel never creates), but the store
+# path doesn't check that, so root can chmod it.
+BAT=/sys/class/power_supply/battery
+CTL=$BAT/charge_control_limit
+: "${CHARGE_STOP:=80}"
+: "${CHARGE_START:=75}"
+: "${CHARGE_POLL:=30}"
+
+if [ ! -e "$CTL" ]; then
+    echo "dipper-charge-limit: $CTL missing, nothing to do"
+    exit 0
+fi
+if [ "$CHARGE_START" -ge "$CHARGE_STOP" ]; then
+    echo "dipper-charge-limit: CHARGE_START=$CHARGE_START must be below CHARGE_STOP=$CHARGE_STOP"
+    exit 1
+fi
+chmod u+w "$CTL" || exit 1
+MAX=$(cat "$BAT/charge_control_limit_max")
+
+# Earlier versions suspended the input; give it back (only if set, since
+# every toggle drops USB).
+[ "$(cat "$BAT/input_suspend" 2>/dev/null)" = 1 ] && echo 0 > "$BAT/input_suspend"
+
+# Never leave the phone unable to charge when the service goes away.
+trap 'echo 0 > "$CTL"; exit 0' TERM INT
+
+echo "dipper-charge-limit: stop at ${CHARGE_STOP}%, resume at ${CHARGE_START}% (charge_control_limit 0/$MAX)"
+while :; do
+    cap=$(cat "$BAT/capacity" 2>/dev/null)
+    st=$(cat "$BAT/status" 2>/dev/null)
+    cur=$(cat "$CTL" 2>/dev/null)
+    case "$cap" in
+    ''|*[!0-9]*) ;;
+    *)
+        if [ "$cap" -ge "$CHARGE_STOP" ] && [ "$st" = Charging ]; then
+            echo "$MAX" > "$CTL" && echo "dipper-charge-limit: ${cap}%, charging stopped"
+        elif [ "$cap" -le "$CHARGE_START" ] && { [ "$cur" = "$MAX" ] || [ "$st" = "Not charging" ]; }; then
+            echo 0 > "$CTL" && echo "dipper-charge-limit: ${cap}%, charging resumed"
+        fi
+        ;;
+    esac
+    sleep "$CHARGE_POLL" &
+    wait $!
+done

@@ -9,7 +9,7 @@ while [ "$DATA_MOUNT_CODE" != "0" ]; do
 done
 
 mkdir /data/cache > /dev/kmsg
-mount -o bind /data/cache /cache > /dev/kmsgs
+mount -o bind /data/cache /cache > /dev/kmsg
 
 setprop halium.datamount.done 1
 

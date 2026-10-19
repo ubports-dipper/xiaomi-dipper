@@ -1,0 +1,5 @@
+#!/bin/sh
+# Dipper-specific setup after the Android container is running.
+# Cache/metadata bind mounts live in mount-android.service.d/dipper.conf.
+
+true

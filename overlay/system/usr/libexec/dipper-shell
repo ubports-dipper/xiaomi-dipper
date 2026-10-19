@@ -1,0 +1,26 @@
+#!/bin/sh
+# Runs as phablet inside the logind session opened by dipper-shell.service
+# (standing in for lightdm-autologin). Hand over to the stock session script:
+# it sets QT_QPA_PLATFORM/GRID_UNIT_PX from deviceinfo, imports the env into
+# the user manager and runs ubuntu-touch-session.target until Lomiri exits.
+# Lomiri's sole-compositor settings live in lomiri-systemd-wrapper.
+echo "dipper-shell: start uid=$(id -u) session=${XDG_SESSION_ID:-none} seat=${XDG_SEAT:-none} vt=${XDG_VTNR:-none} runtime=${XDG_RUNTIME_DIR:-none}"
+loginctl show-session "${XDG_SESSION_ID:-}" -p Active -p State -p Type -p Class 2>&1 | tr '\n' ' '; echo
+
+[ -r /etc/environment ] && . /etc/environment
+export ANDROID_ROOT
+export DESKTOP_SESSION=ubuntu-touch
+# The generic Halium system image reports ro.product.device=halium_arm64, so
+# libdeviceinfo would fall back to default.yaml's "halium" defaults
+# (GridUnit 21) and never read devices/dipper.yaml. Name the device
+# explicitly; ubuntu-touch-session exports this to the whole user session.
+export DEVICEINFO_DEVICE_NAME=dipper
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+export XDG_RUNTIME_DIR
+export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+
+# ubuntu-touch-session silently falls back to GRID_UNIT_PX=18 if device-info
+# returns nothing; log what it will pick up.
+echo "dipper-shell: device-info GridUnit=$(device-info get GridUnit 2>&1) WebkitDpr=$(device-info get WebkitDpr 2>&1)"
+
+exec /usr/bin/ubuntu-touch-session

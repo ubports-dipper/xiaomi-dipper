@@ -1,0 +1,8 @@
+[Unit]
+Description=USB tethering
+After=mount-android.service
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /usr/bin/usb-tethering
+Restart=on-failure

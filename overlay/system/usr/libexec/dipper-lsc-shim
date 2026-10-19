@@ -1,0 +1,165 @@
+#!/usr/bin/python3
+# Stand-in for the D-Bus side of lomiri-system-compositor (USC).
+#
+# On dipper Lomiri is the sole Mir compositor (USC + nested Lomiri cannot both
+# init EGL), but repowerd only learns about the power button and user activity
+# from USC's signals, and switches the display through USC's Display object.
+# Without them the screen times out while in use and the power button can never
+# wake it. This daemon provides exactly the bits repowerd consumes:
+#
+#   com.lomiri.SystemCompositor.PowerButton   signals Press, Release
+#   com.lomiri.SystemCompositor.UserActivity  signal  Activity(i)
+#   com.lomiri.SystemCompositor.Display       TurnOn(s), TurnOff(s), ActiveOutputs (ii)
+#
+# Input is read from evdev without grabbing, so Mir still receives every event.
+# Display on/off is left to repowerd's sysfs backlight backend.
+
+import glob
+import os
+import struct
+import sys
+import time
+
+from gi.repository import Gio, GLib
+
+EV_KEY = 0x01
+EV_ABS = 0x03
+KEY_POWER = 116
+# struct input_event on 64-bit: struct timeval (2 x long), __u16 type, __u16 code, __s32 value
+EVENT = struct.Struct("llHHi")
+
+# repowerd UserActivityType 1 = "extending power state" (keep the screen on).
+ACTIVITY_EXTENDING = 1
+# USC rate-limits activity notifications; repowerd only needs to see that the
+# user is still there.
+ACTIVITY_INTERVAL_US = 1_000_000
+
+BASE = "com.lomiri.SystemCompositor"
+
+DISPLAY_XML = """
+<node>
+  <interface name='com.lomiri.SystemCompositor.Display'>
+    <method name='TurnOn'><arg type='s' name='what' direction='in'/></method>
+    <method name='TurnOff'><arg type='s' name='what' direction='in'/></method>
+    <property name='ActiveOutputs' type='(ii)' access='read'/>
+  </interface>
+</node>
+"""
+POWER_BUTTON_XML = """
+<node>
+  <interface name='com.lomiri.SystemCompositor.PowerButton'>
+    <signal name='Press'/>
+    <signal name='Release'/>
+  </interface>
+</node>
+"""
+USER_ACTIVITY_XML = """
+<node>
+  <interface name='com.lomiri.SystemCompositor.UserActivity'>
+    <signal name='Activity'><arg type='i' name='activity_type'/></signal>
+  </interface>
+</node>
+"""
+
+
+def log(msg):
+    print(f"dipper-lsc-shim: {msg}", flush=True)
+
+
+class Shim:
+    def __init__(self):
+        self.bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        self.last_activity = 0
+        self.display_on = True
+
+        self._register("Display", DISPLAY_XML, self._display_call, self._display_get)
+        self._register("PowerButton", POWER_BUTTON_XML)
+        self._register("UserActivity", USER_ACTIVITY_XML)
+        for name in ("Display", "PowerButton", "UserActivity"):
+            Gio.bus_own_name_on_connection(
+                self.bus, f"{BASE}.{name}", Gio.BusNameOwnerFlags.NONE,
+                lambda _c, n: log(f"acquired {n}"),
+                lambda _c, n: log(f"LOST {n}"))
+
+        for path in sorted(glob.glob("/dev/input/event*")):
+            self._watch(path)
+
+    def _register(self, name, xml, method_cb=None, get_cb=None):
+        iface = Gio.DBusNodeInfo.new_for_xml(xml).interfaces[0]
+        self.bus.register_object(f"/com/lomiri/SystemCompositor/{name}", iface,
+                                 method_cb, get_cb, None)
+
+    def _emit(self, name, signal, params=None):
+        self.bus.emit_signal(None, f"/com/lomiri/SystemCompositor/{name}",
+                             f"{BASE}.{name}", signal, params)
+
+    # --- Display -----------------------------------------------------------
+    def _display_call(self, _conn, _sender, _path, _iface, method, params, invocation):
+        if method in ("TurnOn", "TurnOff"):
+            self.display_on = method == "TurnOn"
+            log(f"{method}({params.unpack()[0]})")
+            invocation.return_value(None)
+            self.bus.emit_signal(
+                None, "/com/lomiri/SystemCompositor/Display",
+                "org.freedesktop.DBus.Properties", "PropertiesChanged",
+                GLib.Variant("(sa{sv}as)", (f"{BASE}.Display",
+                                            {"ActiveOutputs": self._outputs()}, [])))
+        else:
+            invocation.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method)
+
+    def _outputs(self):
+        return GLib.Variant("(ii)", (1 if self.display_on else 0, 0))
+
+    def _display_get(self, _conn, _sender, _path, _iface, prop):
+        return self._outputs() if prop == "ActiveOutputs" else None
+
+    # --- Input -------------------------------------------------------------
+    def _watch(self, path):
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        except OSError as e:
+            log(f"cannot open {path}: {e}")
+            return
+        try:
+            with open(f"/sys/class/input/{os.path.basename(path)}/device/name") as f:
+                name = f.read().strip()
+        except OSError:
+            name = "?"
+        log(f"watching {path} ({name})")
+        GLib.unix_fd_add_full(GLib.PRIORITY_DEFAULT, fd, GLib.IOCondition.IN, self._on_input, path)
+
+    def _on_input(self, fd, _cond, path):
+        try:
+            data = os.read(fd, EVENT.size * 64)
+        except BlockingIOError:
+            return True
+        except OSError as e:
+            log(f"{path}: {e}, dropping")
+            os.close(fd)
+            return False
+        for off in range(0, len(data) - EVENT.size + 1, EVENT.size):
+            _sec, _usec, etype, code, value = EVENT.unpack_from(data, off)
+            if etype == EV_KEY and code == KEY_POWER:
+                if value == 1:
+                    self._emit("PowerButton", "Press")
+                elif value == 0:
+                    self._emit("PowerButton", "Release")
+            elif etype in (EV_KEY, EV_ABS):
+                # Event timestamps are wall-clock and jump when the time is
+                # set at boot; a backwards jump would mute activity for good.
+                now = time.monotonic_ns() // 1000
+                if now - self.last_activity >= ACTIVITY_INTERVAL_US:
+                    self.last_activity = now
+                    # repowerd's LscUserActivity listens for "Activity".
+                    self._emit("UserActivity", "Activity",
+                               GLib.Variant("(i)", (ACTIVITY_EXTENDING,)))
+        return True
+
+
+def main():
+    Shim()
+    GLib.MainLoop().run()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

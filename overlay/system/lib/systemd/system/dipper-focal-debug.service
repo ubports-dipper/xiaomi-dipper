@@ -1,0 +1,12 @@
+[Unit]
+Description=dipper Focal graphics debug capture (logcat/hwcomposer to userdata)
+After=lightdm.service android-mount.service
+Wants=lightdm.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/dipper-focal-debug
+
+[Install]
+WantedBy=multi-user.target

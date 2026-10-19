@@ -1,0 +1,32 @@
+--- a/src/platforms/android/server/gl_context.cpp
++++ b/src/platforms/android/server/gl_context.cpp
+@@ -123,10 +123,15 @@
+ 
+     eglChooseConfig(egl_display, required_egl_config_attr, &the_config, 1, &num_returned_config);
+ 
+-    if (num_returned_config != 1)
+-        BOOST_THROW_EXCEPTION(std::runtime_error("could not select EGL config"));
+-
+-    return the_config;
++    if (num_returned_config == 1)
++        return the_config;
++
++    // dipper/sdm845: a second hardware EGL client (the nested greeter's Mir
++    // server) is handed zero EGL configs while USC owns the GPU, which used to
++    // abort platform creation here. The DeviceQuirks GPU probe only needs
++    // GL_VENDOR/GL_RENDERER, so fall back to a config-less context
++    // (EGL_KHR_no_config_context) + surfaceless context instead of throwing.
++    return (EGLConfig)0; // EGL_NO_CONFIG_KHR
+ }
+ 
+ static bool does_partial_updates()
+@@ -205,7 +210,8 @@
+ mga::PbufferGLContext::PbufferGLContext(mg::GLConfig const& gl_config, mg::DisplayReport& report) :
+     GLContext(gl_config, report),
+     egl_surface{egl_display,
+-                eglCreatePbufferSurface(egl_display, egl_config, dummy_pbuffer_attribs)}
++                egl_config ? eglCreatePbufferSurface(egl_display, egl_config, dummy_pbuffer_attribs)
++                           : EGL_NO_SURFACE}
+ {
+ }
+ 
